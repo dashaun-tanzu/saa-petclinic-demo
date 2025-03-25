@@ -5,7 +5,7 @@ JAVA_8="8.0.442-librca"
 JAVA_11="11.0.26-librca"
 JAVA_17="17.0.14-librca"
 JAVA_23="23.0.2-librca"
-JAR_NAME="hello-spring-0.0.1-SNAPSHOT.jar"
+JAR_NAME="spring-petclinic-2.7.3-spring-boot.jar"
 
 declare -A matrix
 
@@ -23,7 +23,7 @@ check_dependencies() {
 
 talking_point() {
     wait
-    clear
+    #clear
 }
 
 init_sdkman() {
@@ -36,6 +36,8 @@ init_sdkman() {
     fi
     sdk update
     sdk install java $JAVA_8
+    sdk install java $JAVA_11
+    sdk install java $JAVA_17
     sdk install java $JAVA_23
 }
 
@@ -67,7 +69,7 @@ java_dash_jar() {
 java_stop() {
     displayMessage "Stop the Spring Boot application"
     local npid=$(pgrep java)
-    pei "kill -9 $npid"
+    kill -9 $npid
 }
 
 remove_extracted() {
@@ -114,9 +116,43 @@ java_dash_jar_aot_cds() {
 
 validate_app() {
     displayMessage "Check application health"
+    local java_version=$1
+    local spring_version=$2
+    local app_type=$3
+
     while ! http :8080/actuator/health 2>/dev/null; do sleep 1; done
-    matrix["$1,$2,started"]="$(http :8080/actuator/metrics/application.started.time | jq .measurements[0].value)"
-    matrix["$1,$2,memory"]="$(http :8080/actuator/metrics/jvm.memory.used | jq .measurements[0].value)"
+    local startup_time=$(http :8080/actuator/metrics/application.started.time | jq .measurements[0].value)
+    local memory_used=$(http :8080/actuator/metrics/jvm.memory.used | jq .measurements[0].value)
+
+    # Store in matrix
+    matrix["$java_version,$spring_version,$app_type,started"]="$startup_time"
+    matrix["$java_version,$spring_version,$app_type,memory"]="$memory_used"
+
+    # Show the validation table each time
+    show_validation_table
+}
+
+show_validation_table() {
+    displayMessage "Application Validation Metrics"
+
+    # Print table header
+    printf "%-15s %-15s %-15s %-20s %-20s\n" "Java Version" "Spring Version" "App Type" "Startup Time (ms)" "Memory Used (bytes)"
+    printf "%-15s %-15s %-15s %-20s %-20s\n" "------------" "-------------" "--------" "----------------" "------------------"
+
+    # Print table rows
+    for key in "${!matrix[@]}"; do
+        IFS=',' read -r java_version spring_version app_type metric <<< "$key"
+
+        if [[ "$metric" == "started" ]]; then
+            startup_time="${matrix[$key]}"
+            memory_key="$java_version,$spring_version,$app_type,memory"
+            memory_used="${matrix[$memory_key]}"
+
+            printf "%-15s %-15s %-15s %-20s %-20s\n" "$java_version" "$spring_version" "$app_type" "$startup_time" "$memory_used"
+        fi
+    done
+
+    echo
 }
 
 rewrite_application() {
@@ -149,57 +185,84 @@ main() {
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_8 2.7.3
+    validate_app $JAVA_8 "2.7.3" "standard"
     talking_point
     java_stop
+    talking_point
+    #Upgrade to Java 11
     rewrite_application
     talking_point
     use_java $JAVA_11
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_11 2.7.3
+    validate_app $JAVA_11 "2.7.3" "standard"
     talking_point
     java_stop
+    talking_point
+    #Upgrade to Java 17
     rewrite_application
     talking_point
     use_java $JAVA_17
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_17 2.7.3
+    validate_app $JAVA_17 "2.7.3" "standard"
     talking_point
     java_stop
     talking_point
-    aot_processing
+    #Upgrade to Spring Boot 3.0.x
+    rewrite_application
     talking_point
-    java_dash_jar_aot_enabled aot.log
+    java_dash_jar
     talking_point
-    validate_app
-    talking_point
-    java_stop
-    talking_point
-    create_cds_archive
-    talking_point
-    java_dash_jar_cds cds.log
-    talking_point
-    validate_app
+    validate_app $JAVA_17 "3.0.x" "standard"
     talking_point
     java_stop
     talking_point
-    remove_extracted
-    aot_processing
+    #Upgrade to Spring Boot 3.1.x
+    rewrite_application
     talking_point
-    java_dash_jar_extract
+    java_dash_jar
     talking_point
-    create_cds_archive
-    java_dash_jar_aot_cds aotcds.log
-    talking_point
-    validate_app
+    validate_app $JAVA_17 "3.1.x" "standard"
     talking_point
     java_stop
     talking_point
-    stats_so_far_table
+    #Upgrade to Spring Boot 3.2.x
+    rewrite_application
+    talking_point
+    java_dash_jar
+    talking_point
+    validate_app $JAVA_17 "3.2.x" "standard"
+    talking_point
+    java_stop
+    talking_point
+    #Upgrade to Spring Boot 3.3.x
+    rewrite_application
+    talking_point
+    java_dash_jar
+    talking_point
+    validate_app $JAVA_17 "3.3.x" "standard"
+    talking_point
+    java_stop
+    talking_point
+    #Upgrade to Spring Boot 3.4.x
+    rewrite_application
+    talking_point
+    java_dash_jar
+    talking_point
+    validate_app $JAVA_17 "3.4.x" "standard"
+    talking_point
+    java_stop
+    talking_point
+    #
+
+
+
+    # Show final summary table
+    displayMessage "Final Validation Summary"
+    show_validation_table
 }
 
 main
