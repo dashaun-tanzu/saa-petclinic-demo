@@ -4,10 +4,18 @@ TEMP_DIR="upgrade-example"
 JAVA_8="8.0.442-librca"
 JAVA_11="11.0.26-librca"
 JAVA_17="17.0.14-librca"
+JAVA_21="21.0.6-librca"
 JAVA_23="23.0.2-librca"
+JAVA_24="24-librca"
 JAR_NAME="spring-petclinic-2.7.3-spring-boot.jar"
 
 declare -A matrix
+# Array to track the order of entries
+declare -a run_order
+
+# Track first run metrics for percentage calculations
+FIRST_STARTUP_TIME=""
+FIRST_MEMORY_USED=""
 
 # Function definitions
 
@@ -23,7 +31,7 @@ check_dependencies() {
 
 talking_point() {
     wait
-    #clear
+    clear
 }
 
 init_sdkman() {
@@ -66,10 +74,42 @@ java_dash_jar() {
     java -jar ./target/$JAR_NAME &
 }
 
+java_dash_jar() {
+    displayMessage "Start the Spring Boot application (with java -jar)"
+    mvnd -q clean package -DskipTests
+    # Run java in the background with output redirected
+    java -jar ./target/$JAR_NAME > /dev/null 2>&1 &
+    # Store the PID
+    APP_PID=$!
+    # Let the shell "forget" about this process so it won't show "Killed" messages
+    disown $APP_PID
+}
+
 java_stop() {
     displayMessage "Stop the Spring Boot application"
-    local npid=$(pgrep java)
-    kill -9 $npid
+
+    # Find the Java process without showing output
+    local npid=$(pgrep java 2>/dev/null)
+    if [ -n "$npid" ]; then
+        # Redirect all output to /dev/null to hide the "Killed" message
+        { kill -9 $npid; } 2>/dev/null
+
+        # Wait until the process is actually gone, silently
+        while ps -p $npid > /dev/null 2>&1; do
+            sleep 0.1
+        done
+
+        # Additional small delay to ensure resources are freed
+        sleep 1
+    fi
+
+    # Ensure port 8080 is free before continuing, silently
+    while netstat -tuln | grep ":8080 " > /dev/null 2>&1; do
+        sleep 0.5
+    done
+
+    # Clear any leftover output that might have appeared
+    echo -ne "\033[2K\r"
 }
 
 remove_extracted() {
@@ -115,41 +155,94 @@ java_dash_jar_aot_cds() {
 }
 
 validate_app() {
-    displayMessage "Check application health"
+  displayMessage "Check application health"
+  # Hit the main page to generate some load
+  while ! http :8080/ 2>/dev/null; do sleep 1; done
+
+  # Check health
+  while ! http :8080/actuator/health 2>/dev/null; do sleep 1; done
+}
+
+capture_metrics() {
     local java_version=$1
     local spring_version=$2
     local app_type=$3
+    local startup_time
+    local memory_used
 
-    while ! http :8080/actuator/health 2>/dev/null; do sleep 1; done
-    local startup_time=$(http :8080/actuator/metrics/application.started.time | jq .measurements[0].value)
-    local memory_used=$(http :8080/actuator/metrics/jvm.memory.used | jq .measurements[0].value)
+    while ! http :8080/actuator/metrics/application.started.time 2>/dev/null; do sleep 1; done
+    startup_time=$(http :8080/actuator/metrics/application.started.time | jq .measurements[0].value)
+    while ! http :8080/actuator/metrics/jvm.memory.used 2>/dev/null; do sleep 1; done
+    memory_used=$(http :8080/actuator/metrics/jvm.memory.used | jq '.measurements[0].value | floor')
+
+    # Create a unique key for this run
+    local run_key="$java_version,$spring_version,$app_type"
 
     # Store in matrix
-    matrix["$java_version,$spring_version,$app_type,started"]="$startup_time"
-    matrix["$java_version,$spring_version,$app_type,memory"]="$memory_used"
+    matrix["$run_key,started"]="$startup_time"
+    matrix["$run_key,memory"]="$memory_used"
+
+    # Add to run order if not already present
+    if ! [[ " ${run_order[*]} " =~ " ${run_key} " ]]; then
+        run_order+=("$run_key")
+    fi
+
+    # Set first run metrics for percentage calculations if not already set
+    if [[ -z "$FIRST_STARTUP_TIME" ]]; then
+        FIRST_STARTUP_TIME="$startup_time"
+        FIRST_MEMORY_USED="$memory_used"
+    fi
 
     # Show the validation table each time
     show_validation_table
+    sleep 5
+}
+
+calculate_percentage_change() {
+    local current=$1
+    local baseline=$2
+    local change
+
+    if [[ "$baseline" == "0" ]]; then
+        echo "N/A"
+        return
+    fi
+
+    change=$(echo "scale=1; ($current - $baseline) / $baseline * 100" | bc)
+
+    # Add + sign for positive changes
+    if (( $(echo "$change > 0" | bc -l) )); then
+        echo "+${change}%"
+    else
+        echo "${change}%"
+    fi
 }
 
 show_validation_table() {
     displayMessage "Application Validation Metrics"
 
     # Print table header
-    printf "%-15s %-15s %-15s %-20s %-20s\n" "Java Version" "Spring Version" "App Type" "Startup Time (ms)" "Memory Used (bytes)"
-    printf "%-15s %-15s %-15s %-20s %-20s\n" "------------" "-------------" "--------" "----------------" "------------------"
+    printf "%-15s %-15s %-15s %-20s %-15s %-20s %-15s\n" \
+        "Java Version" "Spring Version" "App Type" "Startup Time (ms)" "Time Change" "Memory Used (bytes)" "Memory Change"
+    printf "%-15s %-15s %-15s %-20s %-15s %-20s %-15s\n" \
+        "------------" "-------------" "--------" "----------------" "-----------" "------------------" "-------------"
 
-    # Print table rows
-    for key in "${!matrix[@]}"; do
-        IFS=',' read -r java_version spring_version app_type metric <<< "$key"
+    # Print table rows in order of execution
+    for run_key in "${run_order[@]}"; do
+        local startup_time="${matrix["$run_key,started"]}"
+        local memory_used="${matrix["$run_key,memory"]}"
 
-        if [[ "$metric" == "started" ]]; then
-            startup_time="${matrix[$key]}"
-            memory_key="$java_version,$spring_version,$app_type,memory"
-            memory_used="${matrix[$memory_key]}"
+        # Calculate percentage changes
+        local startup_change=$(calculate_percentage_change "$startup_time" "$FIRST_STARTUP_TIME")
+        local memory_change=$(calculate_percentage_change "$memory_used" "$FIRST_MEMORY_USED")
 
-            printf "%-15s %-15s %-15s %-20s %-20s\n" "$java_version" "$spring_version" "$app_type" "$startup_time" "$memory_used"
-        fi
+        # Parse the run_key
+        IFS=',' read -r java_version spring_version app_type <<< "$run_key"
+
+        printf "%-15s %-15s %-15s %-20.3f %-15s %-20.0f %-15s\n" \
+            "$java_version" "$spring_version" "$app_type" \
+            "$startup_time" "$startup_change" \
+            "$memory_used" "$memory_change"
     done
 
     echo
@@ -185,7 +278,9 @@ main() {
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_8 "2.7.3" "standard"
+    validate_app
+    talking_point
+    capture_metrics $JAVA_8 "2.7.3" "standard"
     talking_point
     java_stop
     talking_point
@@ -196,7 +291,9 @@ main() {
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_11 "2.7.3" "standard"
+    validate_app
+    talking_point
+    capture_metrics $JAVA_11 "2.7.3" "standard"
     talking_point
     java_stop
     talking_point
@@ -207,7 +304,9 @@ main() {
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_17 "2.7.3" "standard"
+    validate_app
+    talking_point
+    capture_metrics $JAVA_17 "2.7.3" "standard"
     talking_point
     java_stop
     talking_point
@@ -216,7 +315,9 @@ main() {
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_17 "3.0.x" "standard"
+    validate_app
+    talking_point
+    capture_metrics $JAVA_17 "3.0.x" "standard"
     talking_point
     java_stop
     talking_point
@@ -225,7 +326,9 @@ main() {
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_17 "3.1.x" "standard"
+    validate_app
+    talking_point
+    capture_metrics $JAVA_17 "3.1.x" "standard"
     talking_point
     java_stop
     talking_point
@@ -234,7 +337,9 @@ main() {
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_17 "3.2.x" "standard"
+    validate_app
+    talking_point
+    capture_metrics $JAVA_17 "3.2.x" "standard"
     talking_point
     java_stop
     talking_point
@@ -243,7 +348,9 @@ main() {
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_17 "3.3.x" "standard"
+    validate_app
+    talking_point
+    capture_metrics $JAVA_17 "3.3.x" "standard"
     talking_point
     java_stop
     talking_point
@@ -252,13 +359,36 @@ main() {
     talking_point
     java_dash_jar
     talking_point
-    validate_app $JAVA_17 "3.4.x" "standard"
+    validate_app
+    talking_point
+    capture_metrics $JAVA_17 "3.4.x" "standard"
     talking_point
     java_stop
     talking_point
-    #
-
-
+    use_java $JAVA_21
+    talking_point
+    java_dash_jar
+    talking_point
+    validate_app
+    talking_point
+    capture_metrics $JAVA_21 "3.4.x" "standard"
+    talking_point
+    use_java $JAVA_23
+    talking_point
+    java_dash_jar
+    talking_point
+    validate_app
+    talking_point
+    capture_metrics $JAVA_23 "3.4.x" "standard"
+    talking_point
+    use_java $JAVA_24
+    talking_point
+    java_dash_jar
+    talking_point
+    validate_app
+    talking_point
+    capture_metrics $JAVA_24 "3.4.x" "standard"
+    talking_point
 
     # Show final summary table
     displayMessage "Final Validation Summary"
