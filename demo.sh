@@ -71,12 +71,6 @@ clone_app() {
 java_dash_jar() {
     displayMessage "Start the Spring Boot application (with java -jar)"
     mvnd -q clean package -DskipTests
-    java -jar ./target/$JAR_NAME &
-}
-
-java_dash_jar() {
-    displayMessage "Start the Spring Boot application (with java -jar)"
-    mvnd -q clean package -DskipTests
     # Run java in the background with output redirected
     java -jar ./target/$JAR_NAME > /dev/null 2>&1 &
     # Store the PID
@@ -206,7 +200,11 @@ calculate_percentage_change() {
         return
     fi
 
-    change=$(echo "scale=1; ($current - $baseline) / $baseline * 100" | bc)
+    # Use scale=4 for more precision in calculation
+    change=$(echo "scale=4; ($current - $baseline) / $baseline * 100" | bc)
+
+    # Force display with 1 decimal place
+    change=$(printf "%.1f" "$change")
 
     # Add + sign for positive changes
     if (( $(echo "$change > 0" | bc -l) )); then
@@ -237,6 +235,7 @@ show_validation_table() {
         # Parse the run_key
         IFS=',' read -r java_version spring_version app_type <<< "$run_key"
 
+        # Note: The %-15s format will keep the percentage display with decimals intact
         printf "%-15s %-15s %-15s %-20.3f %-15s %-20.0f %-15s\n" \
             "$java_version" "$spring_version" "$app_type" \
             "$startup_time" "$startup_change" \
