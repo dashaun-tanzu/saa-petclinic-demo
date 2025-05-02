@@ -372,6 +372,7 @@ main() {
     talking_point
     capture_metrics "standard"
     talking_point
+    java_stop
     use_java $JAVA_23
     talking_point
     java_dash_jar
@@ -380,6 +381,7 @@ main() {
     talking_point
     capture_metrics "standard"
     talking_point
+    java_stop
     use_java $JAVA_24
     talking_point
     java_dash_jar
@@ -388,6 +390,7 @@ main() {
     talking_point
     capture_metrics "standard"
     talking_point
+    java_stop
 
     # Show final summary table
     displayMessage "Final Validation Summary"
