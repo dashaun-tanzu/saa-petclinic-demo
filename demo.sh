@@ -46,7 +46,9 @@ init_sdkman() {
     sdk install java $JAVA_8
     sdk install java $JAVA_11
     sdk install java $JAVA_17
+    sdk install java $JAVA_21
     sdk install java $JAVA_23
+    sdk install java $JAVA_24
 }
 
 init() {
@@ -151,22 +153,22 @@ java_dash_jar_aot_cds() {
 validate_app() {
   displayMessage "Check application health"
   # Hit the main page to generate some load
-  while ! http :8080/ 2>/dev/null; do sleep 1; done
+  while ! http :8080/actuator/info 2>/dev/null; do sleep 1; done
 
   # Check health
   while ! http :8080/actuator/health 2>/dev/null; do sleep 1; done
 }
 
 capture_metrics() {
-    local java_version=$1
-    local app_type=$2
+    local app_type=$1
     local startup_time
     local memory_used
     local boot_version
 
+    java_version=$(http :8080/actuator/info | jq .java.version)
     startup_time=$(http :8080/actuator/metrics/application.started.time | jq .measurements[0].value)
     memory_used=$(http :8080/actuator/metrics/jvm.memory.used | jq '.measurements[0].value | floor')
-    boot_version=$(http :8080/actuator/info | jq '."spring-boot-version"')
+    boot_version=$(http :8080/actuator/info | jq .spring.boot.version)
 
     # Create a unique key for this run
     local run_key="$java_version,$boot_version,$app_type"
@@ -277,7 +279,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_8 "standard"
+    capture_metrics "standard"
     talking_point
     java_stop
     talking_point
@@ -290,7 +292,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_11 "standard"
+    capture_metrics "standard"
     talking_point
     java_stop
     talking_point
@@ -303,7 +305,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_17 "standard"
+    capture_metrics "standard"
     talking_point
     java_stop
     talking_point
@@ -314,7 +316,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_17 "standard"
+    capture_metrics "standard"
     talking_point
     java_stop
     talking_point
@@ -325,7 +327,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_17 "standard"
+    capture_metrics "standard"
     talking_point
     java_stop
     talking_point
@@ -336,7 +338,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_17 "standard"
+    capture_metrics "standard"
     talking_point
     java_stop
     talking_point
@@ -347,7 +349,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_17 "standard"
+    capture_metrics "standard"
     talking_point
     java_stop
     talking_point
@@ -358,7 +360,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_17 "standard"
+    capture_metrics "standard"
     talking_point
     java_stop
     talking_point
@@ -368,7 +370,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_21 "standard"
+    capture_metrics "standard"
     talking_point
     use_java $JAVA_23
     talking_point
@@ -376,7 +378,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_23 "standard"
+    capture_metrics "standard"
     talking_point
     use_java $JAVA_24
     talking_point
@@ -384,7 +386,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics $JAVA_24 "standard"
+    capture_metrics "standard"
     talking_point
 
     # Show final summary table
