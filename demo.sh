@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 
 TEMP_DIR="upgrade-example"
-JAVA_8="8.0.442-librca"
-JAVA_11="11.0.26-librca"
-JAVA_17="17.0.14-librca"
-JAVA_21="21.0.6-librca"
-JAVA_23="23.0.2-librca"
-JAVA_24="24-librca"
+JAVA_8="8.0.452-librca"
+JAVA_11="11.0.27-librca"
+JAVA_17="17.0.15-librca"
+JAVA_21="21.0.7-librca"
+JAVA_24="24.0.1-librca"
 JAR_NAME="spring-petclinic-2.7.3-spring-boot.jar"
 
 declare -A matrix
@@ -47,7 +46,6 @@ init_sdkman() {
     sdk install java $JAVA_11
     sdk install java $JAVA_17
     sdk install java $JAVA_21
-    sdk install java $JAVA_23
     sdk install java $JAVA_24
 }
 
@@ -364,6 +362,18 @@ main() {
     talking_point
     java_stop
     talking_point
+    #Upgrade to Spring Boot 3.5.x
+    rewrite_application
+    talking_point
+    java_dash_jar
+    talking_point
+    validate_app
+    talking_point
+    capture_metrics "standard"
+    talking_point
+    java_stop
+    talking_point
+    #Upgrade to Java 21
     use_java $JAVA_21
     talking_point
     java_dash_jar
@@ -373,15 +383,7 @@ main() {
     capture_metrics "standard"
     talking_point
     java_stop
-    use_java $JAVA_23
-    talking_point
-    java_dash_jar
-    talking_point
-    validate_app
-    talking_point
-    capture_metrics "standard"
-    talking_point
-    java_stop
+    #Upgrade to Java 24
     use_java $JAVA_24
     talking_point
     java_dash_jar
