@@ -4,6 +4,7 @@
 
 # Spring Application Advisor - Spring Petclinic
 
+This demo takes 12-15 minutes to run.
 
 ## Quick Start
 ```bash
