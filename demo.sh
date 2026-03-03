@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
 TEMP_DIR="upgrade-example"
-JAVA_8="8.0.462-librca"
-JAVA_11="11.0.28-librca"
-JAVA_17="17.0.16-librca"
-JAVA_21="21.0.8-librca"
-JAVA_24="24.0.2-librca"
+JAVA_8="8.0.482-librca"
+JAVA_11="11.0.30-librca"
+JAVA_17="17.0.18-librca"
+JAVA_21="21.0.10-librca"
+JAVA_25="25.0.2-librca"
 JAR_NAME="spring-petclinic-2.7.3-spring-boot.jar"
 
 declare -A matrix
@@ -41,12 +41,11 @@ init_sdkman() {
         echo "SDKMAN not found. Please install SDKMAN first."
         exit 1
     fi
-    sdk update
     sdk install java $JAVA_8
     sdk install java $JAVA_11
     sdk install java $JAVA_17
     sdk install java $JAVA_21
-    sdk install java $JAVA_24
+    sdk install java $JAVA_25
 }
 
 init() {
@@ -70,7 +69,18 @@ clone_app() {
 
 java_dash_jar() {
     displayMessage "Start the Spring Boot application (with java -jar)"
-    mvnd -q clean package -DskipTests
+    mvnd -q -T 1C clean package -DskipTests
+    # Run java in the background with output redirected
+    java -jar ./target/$JAR_NAME > /dev/null 2>&1 &
+    # Store the PID
+    APP_PID=$!
+    # Let the shell "forget" about this process so it won't show "Killed" messages
+    disown $APP_PID
+}
+
+java_dash_jar_incremental() {
+    displayMessage "Start the Spring Boot application (with java -jar)"
+    mvnd -q -T 1C package -DskipTests
     # Run java in the background with output redirected
     java -jar ./target/$JAR_NAME > /dev/null 2>&1 &
     # Store the PID
@@ -93,8 +103,6 @@ java_stop() {
             sleep 0.1
         done
 
-        # Additional small delay to ensure resources are freed
-        sleep 1
     fi
 
     # Ensure port 8080 is free before continuing, silently
@@ -150,23 +158,19 @@ java_dash_jar_aot_cds() {
 
 validate_app() {
   displayMessage "Check application health"
-  # Hit the main page to generate some load
-  while ! http :8080/actuator/info 2>/dev/null; do sleep 1; done
-
-  # Check health
   while ! http :8080/actuator/health 2>/dev/null; do sleep 1; done
 }
 
 capture_metrics() {
-    local app_type=$1
+    local java_version=$1
+    local app_type=$2
     local startup_time
     local memory_used
     local boot_version
 
-    java_version=$(http :8080/actuator/info | jq .java.version)
     startup_time=$(http :8080/actuator/metrics/application.started.time | jq .measurements[0].value)
     memory_used=$(http :8080/actuator/metrics/jvm.memory.used | jq '.measurements[0].value | floor')
-    boot_version=$(http :8080/actuator/info | jq .spring.boot.version)
+    boot_version=$(grep -A5 '<parent>' pom.xml | grep '<version>' | head -1 | tr -d ' \t' | sed 's/<version>\(.*\)<\/version>/\1/')
 
     # Create a unique key for this run
     local run_key="$java_version,$boot_version,$app_type"
@@ -265,7 +269,7 @@ main() {
     source ./vendir/demo-magic/demo-magic.sh
     export TYPE_SPEED=100
     export DEMO_PROMPT="${GREEN}➜ ${CYAN}\W ${COLOR_RESET}"
-    export PROMPT_TIMEOUT=5
+    export PROMPT_TIMEOUT=2
 
     init_sdkman
     init
@@ -277,7 +281,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics "standard"
+    capture_metrics $JAVA_8 "standard"
     talking_point
     java_stop
     talking_point
@@ -290,7 +294,7 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics "standard"
+    capture_metrics $JAVA_11 "standard"
     talking_point
     java_stop
     talking_point
@@ -303,96 +307,91 @@ main() {
     talking_point
     validate_app
     talking_point
-    capture_metrics "standard"
+    capture_metrics $JAVA_17 "standard"
     talking_point
     java_stop
     talking_point
     #Upgrade to Spring Boot 3.0.x
     rewrite_application
     talking_point
-    java_dash_jar
+    java_dash_jar_incremental
     talking_point
     validate_app
     talking_point
-    capture_metrics "standard"
+    capture_metrics $JAVA_17 "standard"
     talking_point
     java_stop
     talking_point
     #Upgrade to Spring Boot 3.1.x
     rewrite_application
     talking_point
-    java_dash_jar
-    talking_point
-    validate_app
-    talking_point
-    capture_metrics "standard"
-    talking_point
-    java_stop
-    talking_point
-    #Upgrade to Spring Boot 3.2.x
-    rewrite_application
-    talking_point
-    java_dash_jar
-    talking_point
-    validate_app
-    talking_point
-    capture_metrics "standard"
-    talking_point
-    java_stop
-    talking_point
-    #Upgrade to Spring Boot 3.3.x
-    rewrite_application
-    talking_point
-    java_dash_jar
-    talking_point
-    validate_app
-    talking_point
-    capture_metrics "standard"
-    talking_point
-    java_stop
-    talking_point
-    #Upgrade to Spring Boot 3.4.x
-    rewrite_application
-    talking_point
-    java_dash_jar
-    talking_point
-    validate_app
-    talking_point
-    capture_metrics "standard"
-    talking_point
-    java_stop
-    talking_point
-    #Upgrade to Spring Boot 3.5.x
-    rewrite_application
-    talking_point
-    java_dash_jar
-    talking_point
-    validate_app
-    talking_point
-    capture_metrics "standard"
-    talking_point
-    java_stop
-    talking_point
-    #Upgrade to Java 21
     use_java $JAVA_21
     talking_point
     java_dash_jar
     talking_point
     validate_app
     talking_point
-    capture_metrics "standard"
+    capture_metrics $JAVA_21 "standard"
     talking_point
     java_stop
-    #Upgrade to Java 24
-    use_java $JAVA_24
+    talking_point
+    #Upgrade to Spring Boot 3.2.x
+    rewrite_application
+    talking_point
+    java_dash_jar_incremental
+    talking_point
+    validate_app
+    talking_point
+    capture_metrics $JAVA_21 "standard"
+    talking_point
+    java_stop
+    talking_point
+    #Upgrade to Spring Boot 3.3.x
+    rewrite_application
+    talking_point
+    java_dash_jar_incremental
+    talking_point
+    validate_app
+    talking_point
+    capture_metrics $JAVA_21 "standard"
+    talking_point
+    java_stop
+    talking_point
+    #Upgrade to Spring Boot 3.4.x
+    rewrite_application
+    talking_point
+    java_dash_jar_incremental
+    talking_point
+    validate_app
+    talking_point
+    capture_metrics $JAVA_21 "standard"
+    talking_point
+    java_stop
+    talking_point
+    #Upgrade to Spring Boot 3.5.x
+    rewrite_application
+    talking_point
+    use_java $JAVA_25
     talking_point
     java_dash_jar
     talking_point
     validate_app
     talking_point
-    capture_metrics "standard"
+    capture_metrics $JAVA_25 "standard"
     talking_point
     java_stop
+    talking_point
+    #Upgrade to Spring Boot 4.0.x
+    rewrite_application
+    talking_point
+    java_dash_jar_incremental
+    talking_point
+    validate_app
+    talking_point
+    capture_metrics $JAVA_25 "standard"
+    talking_point
+    java_stop
+    talking_point
 
     # Show final summary table
     displayMessage "Final Validation Summary"
