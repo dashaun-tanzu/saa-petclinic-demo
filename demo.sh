@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 
 TEMP_DIR="upgrade-example"
-JAVA_8="8.0.482-librca"
-JAVA_11="11.0.30-librca"
-JAVA_17="17.0.18-librca"
-JAVA_21="21.0.10-librca"
-JAVA_25="25.0.2-librca"
+
+# Java versions are sourced from .sdkmanrc (one `java=<version>` line per major).
+SDKMANRC="$(dirname "$0")/.sdkmanrc"
+JAVA_8=$(grep  '^java=8\.'  "$SDKMANRC" | cut -d'=' -f2)
+JAVA_11=$(grep '^java=11\.' "$SDKMANRC" | cut -d'=' -f2)
+JAVA_17=$(grep '^java=17\.' "$SDKMANRC" | cut -d'=' -f2)
+JAVA_21=$(grep '^java=21\.' "$SDKMANRC" | cut -d'=' -f2)
+JAVA_25=$(grep '^java=25\.' "$SDKMANRC" | cut -d'=' -f2)
+
 JAR_NAME="spring-petclinic-2.7.3-spring-boot.jar"
 
 declare -A matrix
@@ -19,13 +23,62 @@ FIRST_MEMORY_USED=""
 # Function definitions
 
 check_dependencies() {
-    local tools=("vendir" "http")
+    local tools=("vendir" "http" "mvn" "tar" "git" "jq" "bc")
     for tool in "${tools[@]}"; do
         if ! command -v "$tool" &> /dev/null; then
             echo "$tool not found. Please install $tool first."
             exit 1
         fi
     done
+}
+
+check_env_vars() {
+    local missing_vars=()
+    [[ -z "${ADVISOR_VERSION}" ]] && missing_vars+=("ADVISOR_VERSION")
+    if [ ${#missing_vars[@]} -gt 0 ]; then
+        echo "Missing required environment variables: ${missing_vars[*]}"
+        echo "Set ADVISOR_VERSION (e.g. export ADVISOR_VERSION=1.5.7) and re-run."
+        exit 1
+    fi
+}
+
+# Resolve the advisor CLI artifact id for the current OS/arch
+advisor_artifact_id() {
+    local os arch
+    os=$(uname -s)
+    arch=$(uname -m)
+    case "$os" in
+        Darwin)
+            if [[ "$arch" == "arm64" ]]; then
+                echo "application-advisor-cli-macos-arm64"
+            else
+                echo "application-advisor-cli-macos"
+            fi
+            ;;
+        Linux)
+            echo "application-advisor-cli-linux"
+            ;;
+        MINGW*|MSYS*|CYGWIN*|Windows_NT)
+            echo "application-advisor-cli-windows"
+            ;;
+        *)
+            echo "Unsupported OS: $os" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Download the pinned advisor CLI tar via Maven and extract into the cwd.
+# Must be invoked while cwd is the upgrade-example dir.
+download_advisor() {
+    local artifact tar_file
+    artifact=$(advisor_artifact_id) || exit 1
+    tar_file="${HOME}/.m2/repository/com/vmware/tanzu/spring/${artifact}/${ADVISOR_VERSION}/${artifact}-${ADVISOR_VERSION}.tar"
+
+    displayMessage "Download Spring Application Advisor CLI ${ADVISOR_VERSION} (${artifact})"
+    mvn -U -q dependency:get -Dartifact=com.vmware.tanzu.spring:${artifact}:${ADVISOR_VERSION}:tar -Dtransitive=false
+    tar -xf "${tar_file}" -C .
+    ./cli-binary/advisor --version
 }
 
 talking_point() {
@@ -41,11 +94,6 @@ init_sdkman() {
         echo "SDKMAN not found. Please install SDKMAN first."
         exit 1
     fi
-    sdk install java $JAVA_8
-    sdk install java $JAVA_11
-    sdk install java $JAVA_17
-    sdk install java $JAVA_21
-    sdk install java $JAVA_25
 }
 
 init() {
@@ -251,9 +299,9 @@ show_validation_table() {
 
 rewrite_application() {
     displayMessage "Spring Application Advisor"
-    advisor build-config get
-    advisor upgrade-plan get
-    advisor upgrade-plan apply
+    ./cli-binary/advisor build-config get
+    ./cli-binary/advisor upgrade-plan get
+    ./cli-binary/advisor upgrade-plan apply
 }
 
 displayMessage() {
@@ -265,6 +313,7 @@ displayMessage() {
 
 main() {
     check_dependencies
+    check_env_vars
     vendir sync
     source ./vendir/demo-magic/demo-magic.sh
     export TYPE_SPEED=100
@@ -276,6 +325,8 @@ main() {
     use_java $JAVA_8
     talking_point
     clone_app
+    talking_point
+    download_advisor
     talking_point
     java_dash_jar
     talking_point
